@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Image Pins & Popouts — Lightweight World-Anvil-style</title>
+<style>
+  :root{
+    --bg:#0f1220; --panel:#171a2b; --muted:#8b91a7; --text:#e9ecff; --accent:#8b5cf6; --accent-2:#f59e0b;
+    --ring:rgba(139,92,246,.35); --card:#0f1220ee;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b0e1a,#0e1023);}
+  body{font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; color:var(--text); display:flex; flex-direction:column; gap:.75rem;}
+  /* Toolbar */
+  .toolbar{display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; padding:.75rem; background:var(--panel); box-shadow:0 6px 18px rgba(0,0,0,.25); position:sticky; top:0; z-index:10}
+  .toolbar .group{display:flex; gap:.5rem; align-items:center; background:#0f1220; padding:.5rem; border-radius:14px}
+  .toolbar label{font-size:.85rem; color:var(--muted)}
+  button,.btn, select{
+    background:#10142a; color:var(--text); border:1px solid #1f2544; padding:.55rem .8rem; border-radius:12px; cursor:pointer;
+  }
+  button:hover, .btn:hover, select:hover{border-color:#30365f}
+  .primary{background:linear-gradient(180deg,#6d4ef7,#6337f7); border-color:#6d4ef7;}
+  .danger{background:linear-gradient(180deg,#a11,#811); border-color:#933;}
+  .accent{background:linear-gradient(180deg,#f7b84b,#f59e0b); border-color:#f59e0b; color:#1b1406}
+  .switch{display:inline-flex; gap:.5rem; align-items:center}
+  .switch input{appearance:none; width:42px; height:24px; background:#222744; border-radius:999px; position:relative; outline:none; cursor:pointer; border:1px solid #3a3f6a}
+  .switch input:checked{background:#4f46e5}
+  .switch input::after{content:""; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:white; transition:all .2s}
+  .switch input:checked::after{left:20px}
+  /* Stage */
+  .stage-wrap{position:relative; flex:1; display:flex; justify-content:center; align-items:center; padding:0 .75rem 1rem}
+  .stage{position:relative; max-width:min(95vw,1600px); max-height:calc(100vh - 140px); aspect-ratio:16/9; width:100%; background:#0b0e1a; border:1px solid #1f2544; border-radius:16px; overflow:hidden}
+  .bg{position:absolute; inset:0; background:#060810 center/contain no-repeat}
+  .bg img{position:absolute; inset:0; margin:auto; max-width:100%; max-height:100%; object-fit:contain; display:block; filter:drop-shadow(0 6px 30px rgba(0,0,0,.45))}
+  .overlay{position:absolute; inset:0; pointer-events:none;} /* markers enable pointer-events individually */
+  /* Marker */
+  .marker{position:absolute; transform:translate(-50%,-100%); pointer-events:auto; user-select:none}
+  .pin{width:26px; height:26px; background:radial-gradient(circle at 35% 35%, #fff 0 18%, #ddd 19% 28%, #6d4ef7 29% 100%); border:2px solid #ddd; border-radius:50% 50% 50% 0; transform-origin:50% 100%; transform:translate(-50%,-100%) rotate(45deg); box-shadow:0 6px 16px rgba(0,0,0,.5)}
+  .stamp{font-size:28px; line-height:1; filter:drop-shadow(0 4px 10px rgba(0,0,0,.5))}
+  .selected .pin{outline:3px solid var(--ring)}
+  .handle{position:absolute; left:50%; top:-8px; transform:translate(-50%,-100%); font-size:10px; color:#fff; background:#0008; padding:2px 6px; border-radius:999px; border:1px solid #ffffff30; display:none}
+  .marker.editing .handle{display:block}
+  /* Popover */
+  .popover{position:absolute; min-width:260px; max-width:min(360px, 70vw); background:var(--card); border:1px solid #2b2f4f; border-radius:14px; padding:.65rem .7rem .55rem; transform:translate(-50%, 10px); box-shadow:0 10px 30px rgba(0,0,0,.4); z-index:2}
+  .popover h4{margin:.25rem 0 .35rem; font-size:1rem}
+  .popover p{margin:0; color:#cbd1ff; white-space:pre-wrap}
+  .popover .row{display:flex; gap:.5rem; margin:.4rem 0}
+  .popover input,.popover textarea{width:100%; background:#0c0f21; color:var(--text); border:1px solid #2b315c; border-radius:8px; padding:.45rem .55rem; font-size:.95rem}
+  .popover textarea{min-height:80px; resize:vertical}
+  .popover .actions{display:flex; gap:.4rem; justify-content:flex-end; margin-top:.45rem}
+  .badge{font-size:.72rem; color:#f0eaff; background:#6d4ef7; border-radius:999px; padding:.15rem .5rem; margin-left:.3rem}
+  /* Mini hints */
+  .hint{position:absolute; bottom:8px; left:12px; font-size:.82rem; color:var(--muted); background:#0006; padding:.35rem .55rem; border-radius:10px; border:1px solid #ffffff1a}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="group">
+      <label for="bgFile">Background:</label>
+      <input type="file" id="bgFile" accept="image/*" />
+      <button id="clearBg" title="Clear background">Clear</button>
+    </div>
+
+    <div class="group">
+      <button id="addPin" class="primary" title="Add a pin (click on image)">➕ Pin</button>
+      <select id="stampPicker" title="Pick a stamp to place">
+        <option value="">➕ Stamp…</option>
+        <option>⭐</option>
+        <option>⚠️</option>
+        <option>🏁</option>
+        <option>📜</option>
+        <option>🧭</option>
+        <option>🏰</option>
+        <option>🪙</option>
+        <option>🐾</option>
+      </select>
+      <button id="showAll" title="Show all popouts">Show All</button>
+      <button id="hideAll" title="Hide all popouts">Hide All</button>
+    </div>
+
+    <div class="group">
+      <label class="switch" title="Toggle edit/lock">
+        <span>Edit mode</span>
+        <input id="editToggle" type="checkbox" checked />
+      </label>
+      <button id="bringFront">Bring to Front</button>
+      <button id="sendBack">Send to Back</button>
+    </div>
+
+    <div class="group">
+      <button id="saveJson" class="accent" title="Download .json">Save</button>
+      <label class="btn" for="loadJson">Load</label>
+      <input id="loadJson" type="file" accept="application/json" class="hidden" />
+      <button id="exportPng" title="Export a flat PNG">Export PNG</button>
+    </div>
+
+    <div class="group">
+      <button id="clearAll" class="danger" title="Remove all markers">Clear Markers</button>
+    </div>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <div class="bg" id="bg"><!-- image injected here --></div>
+      <div class="overlay" id="overlay" aria-label="Markers layer"></div>
+      <div class="hint" id="hint">Tip: With “Edit mode” on, drag markers to move. Click a marker to open its popout. Right-click to delete.</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+
+  const state = {
+    bgDataUrl: null,
+    markers: [], // {id,type:'pin'|'stamp', icon?, xPct, yPct, title, body, z}
+    placing: null, // 'pin' or an emoji for stamp
+    selectedId: null,
+    editMode: true,
+    zCounter: 1,
+  };
+
+  // Elements
+  const bgFile = $('#bgFile');
+  const clearBgBtn = $('#clearBg');
+  const addPinBtn = $('#addPin');
+  const stampPicker = $('#stampPicker');
+  const stage = $('#stage');
+  const bg = $('#bg');
+  const overlay = $('#overlay');
+  const editToggle = $('#editToggle');
+  const bringFrontBtn = $('#bringFront');
+  const sendBackBtn = $('#sendBack');
+  const showAllBtn = $('#showAll');
+  const hideAllBtn = $('#hideAll');
+  const saveJsonBtn = $('#saveJson');
+  const loadJsonInput = $('#loadJson');
+  const exportPngBtn = $('#exportPng');
+  const clearAllBtn = $('#clearAll');
+  const hint = $('#hint');
+
+  // --- Helpers
+  function uid(){ return 'm'+Math.random().toString(36).slice(2,9); }
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+  function stageRect(){ return stage.getBoundingClientRect(); }
+
+  function clientToPct(clientX, clientY){
+    const r = stageRect();
+    const x = clamp((clientX - r.left)/r.width, 0, 1);
+    const y = clamp((clientY - r.top)/r.height, 0, 1);
+    return { xPct: +(x*100).toFixed(4), yPct: +(y*100).toFixed(4) };
+  }
+
+  function pctToPx(xPct, yPct){
+    const r = stageRect();
+    return { x: r.left + r.width*(xPct/100), y: r.top + r.height*(yPct/100) };
+  }
+
+  function setPlacing(mode){
+    state.placing = mode; // 'pin' or emoji or null
+    addPinBtn.classList.toggle('primary', mode==='pin');
+    stampPicker.value = mode && mode!=='pin' ? mode : '';
+    hint.textContent = mode ? 'Click on the image to place the marker' : 'Tip: With “Edit mode” on, drag markers to move. Click a marker to open its popout. Right-click to delete.';
+  }
+
+  function renderBg(){
+    bg.innerHTML = '';
+    if(!state.bgDataUrl){ return; }
+    const img = new Image();
+    img.src = state.bgDataUrl;
+    img.alt = 'Background';
+    bg.appendChild(img);
+  }
+
+  function renderAll(){
+    overlay.innerHTML = '';
+    for(const m of state.markers){
+      overlay.appendChild(renderMarker(m));
+    }
+  }
+
+  function renderMarker(m){
+    const wrap = document.createElement('div');
+    wrap.className = 'marker';
+    wrap.dataset.id = m.id;
+    wrap.style.left = m.xPct + '%';
+    wrap.style.top  = m.yPct + '%';
+    wrap.style.zIndex = m.z ?? 1;
+
+    // body
+    if(m.type==='pin'){
+      const pin = document.createElement('div');
+      pin.className = 'pin';
+      wrap.appendChild(pin);
+    } else {
+      const span = document.createElement('div');
+      span.className = 'stamp';
+      span.textContent = m.icon || '⭐';
+      wrap.appendChild(span);
+    }
+
+    const handle = document.createElement('div');
+    handle.className = 'handle';
+    handle.textContent = 'drag';
+    wrap.appendChild(handle);
+
+    // interactions
+    setupMarkerInteractions(wrap, m);
+
+    // popover (initially hidden)
+    const pop = createPopover(m);
+    pop.classList.add('hidden');
+    wrap.appendChild(pop);
+
+    return wrap;
+  }
+
+  function createPopover(m){
+    const pop = document.createElement('div');
+    pop.className = 'popover';
+    pop.innerHTML = `
+      <div class="row" style="align-items:center; justify-content:space-between">
+        <h4>${escapeHtml(m.title || 'Untitled')} <span class="badge">${m.type==='pin'?'Pin':'Stamp'}</span></h4>
+        <div class="row" style="gap:.3rem">
+          <button class="btn" data-action="edit">✏️ Edit</button>
+          <button class="btn danger" data-action="delete">🗑️</button>
+        </div>
+      </div>
+      <p class="view-body">${escapeHtml(m.body || 'No details yet. Click ✏️ to add.')}</p>
+      <div class="edit-fields hidden">
+        <div class="row"><input type="text" name="title" placeholder="Title" value="${escapeAttr(m.title || '')}"></div>
+        <div class="row"><textarea name="body" placeholder="Details...">${escapeHtml(m.body || '')}</textarea></div>
+        <div class="actions">
+          <button class="btn" data-action="cancel">Cancel</button>
+          <button class="btn primary" data-action="save">Save</button>
+        </div>
+      </div>
+    `;
+    pop.addEventListener('click', (e)=>{
+      const b = e.target.closest('button'); if(!b) return;
+      const act = b.dataset.action;
+      if(act==='edit'){ toggleEditFields(pop, true); }
+      if(act==='cancel'){ toggleEditFields(pop, false); }
+      if(act==='save'){
+        const title = pop.querySelector('input[name=title]').value.trim();
+        const body  = pop.querySelector('textarea[name=body]').value.trim();
+        m.title = title; m.body = body;
+        pop.querySelector('h4').innerHTML = `${escapeHtml(title||'Untitled')} <span class="badge">${m.type==='pin'?'Pin':'Stamp'}</span>`;
+        pop.querySelector('.view-body').textContent = body || 'No details yet. Click ✏️ to add.';
+        toggleEditFields(pop, false);
+        persistLocal();
+      }
+      if(act==='delete'){
+        removeMarker(m.id);
+      }
+    });
+    return pop;
+  }
+
+  function toggleEditFields(pop, editOn){
+    pop.querySelector('.view-body').classList.toggle('hidden', editOn);
+    pop.querySelector('.edit-fields').classList.toggle('hidden', !editOn);
+  }
+
+  function showPopover(id, show=true){
+    const el = overlay.querySelector(`.marker[data-id="${id}"]`);
+    if(!el) return;
+    const pop = el.querySelector('.popover');
+    pop.classList.toggle('hidden', !show);
+  }
+
+  function selectMarker(id){
+    state.selectedId = id;
+    $$('.marker', overlay).forEach(m => m.classList.toggle('selected', m.dataset.id===id));
+  }
+
+  function removeMarker(id){
+    state.markers = state.markers.filter(m=>m.id!==id);
+    const node = overlay.querySelector(`.marker[data-id="${id}"]`);
+    if(node) node.remove();
+    if(state.selectedId===id) state.selectedId = null;
+    persistLocal();
+  }
+
+  // drag+drop
+  function setupMarkerInteractions(node, m){
+    let dragging = false;
+    let offset = {x:0,y:0};
+
+    const canDrag = () => state.editMode;
+
+    node.addEventListener('pointerdown', (e)=>{
+      if(e.button===2){ // right-click delete (context)
+        e.preventDefault();
+        removeMarker(m.id);
+        return;
+      }
+      selectMarker(m.id);
+      if(canDrag()){
+        dragging = true;
+        node.setPointerCapture(e.pointerId);
+        const r = stageRect();
+        offset.x = e.clientX - (r.left + r.width*(m.xPct/100));
+        offset.y = e.clientY - (r.top  + r.height*(m.yPct/100));
+        node.classList.add('editing');
+      }
+    });
+
+    node.addEventListener('pointermove', (e)=>{
+      if(!dragging) return;
+      const r = stageRect();
+      const nx = clamp(((e.clientX - offset.x) - r.left)/r.width, 0, 1);
+      const ny = clamp(((e.clientY - offset.y) - r.top )/r.height, 0, 1);
+      m.xPct = +(nx*100).toFixed(4);
+      m.yPct = +(ny*100).toFixed(4);
+      node.style.left = m.xPct+'%';
+      node.style.top  = m.yPct+'%';
+    });
+
+    node.addEventListener('pointerup', (e)=>{
+      if(dragging){
+        dragging = false;
+        node.releasePointerCapture(e.pointerId);
+        node.classList.remove('editing');
+        persistLocal();
+      } else {
+        // Click toggles popover
+        const pop = node.querySelector('.popover');
+        const isHidden = pop.classList.contains('hidden');
+        // Hide others first
+        $$('.marker .popover', overlay).forEach(p=>p.classList.add('hidden'));
+        pop.classList.toggle('hidden', !isHidden);
+      }
+    });
+
+    // prevent default image drag ghost
+    node.addEventListener('dragstart', e=>e.preventDefault());
+    // Keep popover inside bounds (reposition on window resize)
+    const reposition = () => {
+      const pop = node.querySelector('.popover');
+      if(!pop || pop.classList.contains('hidden')) return;
+      // Could add smart flipping if near edges; minimal version relies on translate centering.
+    };
+    window.addEventListener('resize', reposition);
+  }
+
+  // --- Actions
+  bgFile.addEventListener('change', async (e)=>{
+    const file = e.target.files?.[0];
+    if(!file) return;
+    const dataUrl = await readAsDataURL(file);
+    state.bgDataUrl = dataUrl;
+    renderBg();
+    persistLocal();
+  });
+
+  clearBgBtn.addEventListener('click', ()=>{
+    state.bgDataUrl = null;
+    renderBg();
+    persistLocal();
+  });
+
+  addPinBtn.addEventListener('click', ()=>{
+    setPlacing(state.placing==='pin' ? null : 'pin');
+  });
+
+  stampPicker.addEventListener('change', ()=>{
+    const v = stampPicker.value || null;
+    setPlacing(v);
+  });
+
+  stage.addEventListener('click', (e)=>{
+    if(!state.placing) return;
+    if(e.target.closest('.marker') || e.target.closest('.popover')) return; // ignore clicks on markers
+    const {xPct,yPct} = clientToPct(e.clientX, e.clientY);
+    const m = {
+      id: uid(),
+      type: state.placing==='pin' ? 'pin' : 'stamp',
+      icon: state.placing!=='pin' ? state.placing : undefined,
+      xPct, yPct,
+      title: '',
+      body: '',
+      z: ++state.zCounter
+    };
+    state.markers.push(m);
+    overlay.appendChild(renderMarker(m));
+    persistLocal();
+    setPlacing(null); // place single by default; change if you want multi-place
+  });
+
+  editToggle.addEventListener('change', ()=>{
+    state.editMode = editToggle.checked;
+    hint.textContent = state.editMode
+      ? 'Tip: With “Edit mode” on, drag markers to move. Click a marker to open its popout. Right-click to delete.'
+      : 'Edit mode is off — markers are locked.';
+  });
+
+  bringFrontBtn.addEventListener('click', ()=>{
+    if(!state.selectedId) return;
+    const m = state.markers.find(x=>x.id===state.selectedId);
+    if(!m) return;
+    m.z = ++state.zCounter;
+    const node = overlay.querySelector(`.marker[data-id="${m.id}"]`);
+    if(node) node.style.zIndex = m.z;
+    persistLocal();
+  });
+
+  sendBackBtn.addEventListener('click', ()=>{
+    if(!state.selectedId) return;
+    const m = state.markers.find(x=>x.id===state.selectedId);
+    if(!m) return;
+    m.z = 1;
+    const node = overlay.querySelector(`.marker[data-id="${m.id}"]`);
+    if(node) node.style.zIndex = m.z;
+    persistLocal();
+  });
+
+  showAllBtn.addEventListener('click', ()=>{
+    $$('.marker .popover', overlay).forEach(p=>p.classList.remove('hidden'));
+  });
+  hideAllBtn.addEventListener('click', ()=>{
+    $$('.marker .popover', overlay).forEach(p=>p.classList.add('hidden'));
+  });
+
+  // Save/Load
+  saveJsonBtn.addEventListener('click', ()=>{
+    const payload = exportProject();
+    downloadBlob(JSON.stringify(payload,null,2), `map-project-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`, 'application/json');
+  });
+
+  loadJsonInput.addEventListener('change', async (e)=>{
+    const file = e.target.files?.[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      importProject(data);
+      persistLocal();
+    }catch(err){
+      alert('Invalid project file.');
+      console.error(err);
+    }
+  });
+
+  exportPngBtn.addEventListener('click', async ()=>{
+    const png = await renderToPng();
+    if(!png){ alert('Nothing to export.'); return; }
+    downloadBlob(png, `map-export-${Date.now()}.png`, 'image/png');
+  });
+
+  clearAllBtn.addEventListener('click', ()=>{
+    if(!confirm('Remove all markers?')) return;
+    state.markers = [];
+    renderAll();
+    persistLocal();
+  });
+
+  // --- Persistence
+  function exportProject(){
+    return {
+      version: 1,
+      bgDataUrl: state.bgDataUrl || null,
+      markers: state.markers
+    };
+  }
+  function importProject(data){
+    state.bgDataUrl = data.bgDataUrl || null;
+    state.markers   = Array.isArray(data.markers) ? data.markers : [];
+    state.zCounter  = Math.max(1, ...state.markers.map(m=>m.z||1));
+    renderBg(); renderAll();
+  }
+  function persistLocal(){
+    try{
+      localStorage.setItem('map-popouts-autosave', JSON.stringify(exportProject()));
+    }catch(e){}
+  }
+  function restoreLocal(){
+    try{
+      const raw = localStorage.getItem('map-popouts-autosave');
+      if(!raw) return;
+      const data = JSON.parse(raw);
+      importProject(data);
+    }catch(e){}
+  }
+
+  // --- Export to PNG (simple DOM-to-canvas without external libs)
+  async function renderToPng(){
+    // Minimal approach: use <canvas>, draw bg image, then draw markers and popovers (text-only).
+    if(!state.bgDataUrl) return null;
+    // Create an offscreen canvas at current stage pixel size
+    const r = stageRect();
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // draw background
+    const img = await loadImage(state.bgDataUrl);
+    // Fit contain
+    const {sx,sy,sw,sh,dx,dy,dw,dh} = objectFitContain(img.width,img.height,w,h);
+    ctx.fillStyle = '#0b0e1a';
+    ctx.fillRect(0,0,w,h);
+    ctx.drawImage(img, sx,sy,sw,sh, dx,dy,dw,dh);
+
+    // draw markers
+    for(const m of state.markers.sort((a,b)=>(a.z||1)-(b.z||1))){
+      const px = w*(m.xPct/100), py = h*(m.yPct/100);
+      if(m.type==='pin'){
+        // simple pin: circle + tail
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(Math.PI/4);
+        // body
+        ctx.fillStyle = '#6d4ef7';
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, -16, 13, 0, Math.PI*2);
+        ctx.fill(); ctx.stroke();
+        // tail
+        ctx.beginPath();
+        ctx.moveTo(0,-3); ctx.lineTo(0,12);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // stamp emoji
+        ctx.font = '28px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(m.icon || '⭐', px, py);
+      }
+      // draw title (popover indicator if popover currently visible)
+      const node = overlay.querySelector(`.marker[data-id="${m.id}"] .popover`);
+      const isVisible = node && !node.classList.contains('hidden');
+      if(isVisible){
+        ctx.save();
+        ctx.translate(px, py+10);
+        const text = (m.title || 'Untitled').slice(0,60);
+        const body = (m.body || '').slice(0,240);
+        const cardW = Math.min(360, w*0.7);
+        const lines = wrapText(ctx, body, cardW-24, '14px sans-serif');
+        const titleMetrics = measureText(ctx, text, 'bold 16px sans-serif');
+        const cardH = 18 + 8 + lines.length*18 + 14 + 10;
+        // card
+        ctx.fillStyle = 'rgba(15,18,32,0.93)';
+        roundRect(ctx, -cardW/2, 0, cardW, cardH, 12, true, false);
+        ctx.strokeStyle = '#2b2f4f'; ctx.lineWidth = 1;
+        roundRect(ctx, -cardW/2, 0, cardW, cardH, 12, false, true);
+        // title
+        ctx.fillStyle = '#e9ecff';
+        drawText(ctx, text, -cardW/2+12, 20, 'bold 16px sans-serif');
+        // body
+        ctx.fillStyle = '#cbd1ff';
+        let y = 20+8;
+        for(const line of lines){ drawText(ctx, line, -cardW/2+12, y+=18, '14px sans-serif'); }
+        ctx.restore();
+      }
+    }
+
+    return await new Promise(res=>canvas.toBlob(b=>res(b),'image/png',1));
+  }
+
+  // --- Utils (canvas/text)
+  function roundRect(ctx, x, y, w, h, r, fill, stroke){
+    if (w < 2 * r) r = w / 2;
+    if (h < 2 * r) r = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y,   x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x,   y+h, r);
+    ctx.arcTo(x,   y+h, x,   y,   r);
+    ctx.arcTo(x,   y,   x+w, y,   r);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+  function wrapText(ctx, text, maxWidth, font){
+    ctx.font = font;
+    const words = text.split(/\s+/);
+    const lines = []; let line = '';
+    for(const w of words){
+      const test = line ? line+' '+w : w;
+      if(ctx.measureText(test).width <= maxWidth){ line = test; }
+      else { if(line) lines.push(line); line = w; }
+    }
+    if(line) lines.push(line);
+    return lines.slice(0,12);
+  }
+  function drawText(ctx, text, x, y, font){ ctx.font = font; ctx.fillText(text, x, y); }
+  function measureText(ctx, text, font){ ctx.font = font; return ctx.measureText(text); }
+  function objectFitContain(sw,sh, w,h){
+    const sr = sw/sh, dr = w/h;
+    if(sr>dr){ // fit width
+      const dw = w, dh = w/sr;
+      return {sx:0,sy:0,sw,sh, dx:0, dy:(h-dh)/2, dw, dh};
+    } else {
+      const dh = h, dw = h*sr;
+      return {sx:0,sy:0,sw,sh, dx:(w-dw)/2, dy:0, dw, dh};
+    }
+  }
+
+  // --- File helpers
+  function readAsDataURL(file){
+    return new Promise((res,rej)=>{
+      const r = new FileReader();
+      r.onload = ()=>res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+  }
+  function downloadBlob(blobOrStr, filename, type){
+    const blob = blobOrStr instanceof Blob ? blobOrStr : new Blob([blobOrStr], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 500);
+  }
+  function loadImage(src){
+    return new Promise((res,rej)=>{
+      const img = new Image();
+      img.onload = ()=>res(img);
+      img.onerror = rej;
+      img.src = src;
+    });
+  }
+  function escapeHtml(s){ return (s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;' }[m])); }
+  function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+  // --- Startup
+  restoreLocal();
+  renderBg();
+  renderAll();
+
+  // Close popovers when clicking outside
+  document.addEventListener('click', (e)=>{
+    if(e.target.closest('.marker')) return;
+    $$('.marker .popover', overlay).forEach(p=>p.classList.add('hidden'));
+  });
+
+  // Prevent context menu on stage (so right-click = delete)
+  stage.addEventListener('contextmenu', (e)=>{
+    if(e.target.closest('.marker')){ e.preventDefault(); }
+  });
+})();
+</script>
+</body>
+</html>
